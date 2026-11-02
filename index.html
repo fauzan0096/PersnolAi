@@ -1,0 +1,220 @@
+<!DOCTYPE html>
+<html lang="ur">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0f1115">
+<link rel="manifest" href="dot-manifest.json">
+<link rel="icon" href="dot-icon.png">
+<link rel="apple-touch-icon" href="dot-icon.png">
+<title>Mera Dot</title>
+<style>
+:root{--bg:#0f1115;--card:#181b21;--line:#262a33;--tx:#e8eaee;--mut:#8b93a1;--ac:#4ade80;--me:#1f3d2b}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;margin:0;background:var(--bg);color:var(--tx);font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+#app{height:100%;display:flex;flex-direction:column;padding-top:env(safe-area-inset-top)}
+header{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line)}
+header h1{font-size:17px;margin:0;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+button{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+button.p{background:var(--ac);color:#06210f;border-color:var(--ac);font-weight:600}
+button.d{color:#f87171}
+.ic{padding:6px 10px;font-size:18px;line-height:1}
+main{flex:1;overflow-y:auto;padding:14px}
+.dot{display:flex;align-items:center;gap:12px;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:10px}
+.dot .av{width:42px;height:42px;border-radius:50%;background:var(--me);display:grid;place-items:center;font-size:20px;flex:none}
+.dot b{display:block}.dot small{color:var(--mut)}
+.msg{max-width:88%;padding:10px 12px;border-radius:14px;margin-bottom:8px;white-space:pre-wrap;word-wrap:break-word;line-height:1.5}
+.me{background:var(--me);margin-left:auto;border-bottom-right-radius:4px}
+.ai{background:var(--card);border:1px solid var(--line);border-bottom-left-radius:4px}
+.sys{color:var(--mut);font-size:13px;text-align:center;margin:8px 0}
+footer{display:flex;gap:8px;padding:10px 12px calc(10px + env(safe-area-inset-bottom));border-top:1px solid var(--line)}
+footer textarea{flex:1;resize:none;max-height:120px}
+input,textarea,select{font:inherit;color:var(--tx);background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px;width:100%}
+label{display:block;color:var(--mut);font-size:13px;margin:12px 0 4px}
+.row{display:flex;gap:8px;margin-top:12px}.row>*{flex:1}
+.hide{display:none!important}
+.src{margin-top:8px;padding-top:8px;border-top:1px solid var(--line);font-size:12px;color:var(--mut);line-height:1.8}
+.src a{color:var(--ac);text-decoration:none;display:inline-block;margin:0 8px 0 0}
+.chk{display:flex;gap:10px;align-items:center;color:var(--tx);font-size:15px;margin-top:14px}
+.chk input{width:auto}
+.note{color:var(--mut);font-size:13px;line-height:1.6}
+.mem{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 10px;margin-bottom:6px;display:flex;gap:8px;align-items:center}
+.mem span{flex:1}
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <button class="ic hide" id="back">‹</button>
+    <h1 id="title">Mere Dots</h1>
+    <button class="ic hide" id="gear2">⚙︎</button>
+    <button class="ic" id="gear">⚙</button>
+  </header>
+  <main id="main"></main>
+  <footer id="foot" class="hide">
+    <textarea id="inp" rows="1" placeholder="Dot se kuch kahein..."></textarea>
+    <button class="p" id="send">Bhejein</button>
+  </footer>
+</div>
+
+<script>
+// ---------- storage ----------
+const K='mera_dot_v1';
+let S;
+try{S=JSON.parse(localStorage.getItem(K))}catch(e){}
+S=S||{cfg:{prov:'gemini',key:'',model:'gemini-2.5-flash',search:true},dots:[],cur:null};
+const save=()=>{try{localStorage.setItem(K,JSON.stringify(S))}catch(e){}};
+const $=id=>document.getElementById(id);
+const esc=s=>s.replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const uid=()=>Math.random().toString(36).slice(2,9);
+const dot=()=>S.dots.find(d=>d.id===S.cur);
+let busy=false;
+
+// ---------- views ----------
+function show(view){
+  $('back').classList.toggle('hide',view==='list');
+  $('gear').classList.toggle('hide',view!=='list');
+  $('gear2').classList.toggle('hide',view!=='chat');
+  $('foot').classList.toggle('hide',view!=='chat');
+}
+function list(){
+  S.cur=null;save();show('list');$('title').textContent='Mere Dots';
+  let h='';
+  if(!S.cfg.key)h+='<div class="sys">Pehle ⚙ Settings mein free key paste karein.</div>';
+  S.dots.forEach(d=>{h+=`<div class="dot" data-id="${d.id}"><div class="av">${esc(d.emoji||'●')}</div><div><b>${esc(d.name)}</b><small>${esc((d.job||'').slice(0,60))}</small></div></div>`});
+  h+='<button class="p" id="new" style="width:100%;margin-top:6px">+ Naya Dot</button>';
+  $('main').innerHTML=h;
+  $('main').querySelectorAll('.dot').forEach(e=>e.onclick=()=>openChat(e.dataset.id));
+  $('new').onclick=()=>edit(null);
+}
+function openChat(id){
+  S.cur=id;save();show('chat');const d=dot();$('title').textContent=(d.emoji||'●')+' '+d.name;
+  const m=$('main');m.innerHTML='';
+  if(!d.msgs.length)m.innerHTML='<div class="sys">Baat shuru karein.</div>';
+  d.msgs.forEach(x=>bubble(x.role==='user'?'user':'ai',x.text,x.src));
+  m.scrollTop=m.scrollHeight;
+}
+function bubble(role,text,src){
+  const m=$('main');const s=m.querySelector('.sys');if(s)s.remove();
+  const e=document.createElement('div');e.className='msg '+(role==='user'?'me':'ai');
+  const t=document.createElement('span');t.textContent=text;e.appendChild(t);
+  addSrc(e,src);
+  m.appendChild(e);m.scrollTop=m.scrollHeight;return e;
+}
+function addSrc(e,src){
+  const old=e.querySelector('.src');if(old)old.remove();
+  if(!src||!src.length)return;
+  const b=document.createElement('div');b.className='src';b.appendChild(document.createTextNode('Sources: '));
+  src.forEach(x=>{const a=document.createElement('a');a.href=x.u;a.target='_blank';a.rel='noopener noreferrer';a.textContent=x.t;b.appendChild(a)});
+  e.appendChild(b);
+}
+function edit(id){
+  show('edit');$('title').textContent=id?'Dot badlein':'Naya Dot';
+  const d=id?S.dots.find(x=>x.id===id):{name:'',emoji:'🟢',job:'',mem:[]};
+  $('main').innerHTML=`
+  <label>Naam</label><input id="f_name" value="${esc(d.name)}">
+  <label>Emoji</label><input id="f_emoji" value="${esc(d.emoji||'')}" maxlength="2">
+  <label>Iska kaam / hidayaat</label><textarea id="f_job" rows="5" placeholder="Misal: Tum mera Roman Urdu mein madadgar ho...">${esc(d.job||'')}</textarea>
+  <label>Yaaddasht (Dot ne aap ke baare mein yaad rakha)</label><div id="mems"></div>
+  <div class="row"><button class="p" id="ok">Save</button>${id?'<button class="d" id="del">Mita dein</button>':''}</div>`;
+  const rm=()=>{$('mems').innerHTML=(d.mem||[]).map((t,i)=>`<div class="mem"><span>${esc(t)}</span><button class="d ic" data-i="${i}">✕</button></div>`).join('')||'<div class="note">Abhi kuch nahi.</div>';
+    $('mems').querySelectorAll('button').forEach(b=>b.onclick=()=>{d.mem.splice(+b.dataset.i,1);if(id)save();rm()})};rm();
+  $('ok').onclick=()=>{
+    const name=$('f_name').value.trim();if(!name)return alert('Naam likhein');
+    d.name=name;d.emoji=$('f_emoji').value.trim()||'🟢';d.job=$('f_job').value.trim();
+    if(!id){d.id=uid();d.msgs=[];d.mem=d.mem||[];S.dots.push(d)}
+    save();id?openChat(id):list();
+  };
+  if(id)$('del').onclick=()=>{if(confirm('Is Dot ki saari chat bhi mit jayegi. Pakka?')){S.dots=S.dots.filter(x=>x.id!==id);save();list()}};
+}
+function settings(){
+  show('edit');$('title').textContent='Settings';const c=S.cfg;
+  $('main').innerHTML=`
+  <label>AI provider</label>
+  <select id="c_prov"><option value="gemini">Google Gemini (free)</option><option value="openrouter">OpenRouter (free models)</option></select>
+  <label>API key</label><input id="c_key" type="password" value="${esc(c.key)}" placeholder="Yahan paste karein" autocomplete="off">
+  <label>Model</label><input id="c_model" value="${esc(c.model)}">
+  <label class="chk"><input type="checkbox" id="c_search" ${c.search!==false?'checked':''}> Live web search (sirf Gemini)</label>
+  <div class="note" style="margin-top:10px">
+  • Gemini key: aistudio.google.com/apikey par free milti hai (model: gemini-2.5-flash).<br>
+  • OpenRouter key: openrouter.ai/keys, model ke aakhir mein <b>:free</b> wala chunein, jaise deepseek/deepseek-chat-v3.1:free.<br>
+  • Key sirf is phone ke browser mein save hoti hai, kisi repo ya server mein nahi jati.<br>
+  • Web search on ho to Dot taaza maloomat Google se dhoondh kar sources ke links ke saath deta hai. Free key par iski rozana limit hoti hai; limit khatam ho to Dot bina search ke jawab dega.<br>
+  • Free models ke naam badalte rehte hain. Agar error aaye to model ka naam yahan badal dein.</div>
+  <div class="row"><button class="p" id="c_ok">Save</button></div>
+  <div class="row"><button class="d" id="c_wipe">Saara data mita dein</button></div>`;
+  $('c_prov').value=c.prov;
+  $('c_prov').onchange=()=>{$('c_model').value=$('c_prov').value==='gemini'?'gemini-2.5-flash':'deepseek/deepseek-chat-v3.1:free'};
+  $('c_ok').onclick=()=>{S.cfg={prov:$('c_prov').value,key:$('c_key').value.trim(),model:$('c_model').value.trim(),search:$('c_search').checked};save();S.cur?openChat(S.cur):list()};
+  $('c_wipe').onclick=()=>{if(confirm('Sab dots, chats aur key mit jayenge. Pakka?')){localStorage.removeItem(K);location.reload()}};
+}
+
+// ---------- AI ----------
+function sysPrompt(d){
+  return `Tum "${d.name}" ho, ek personal AI dot. Jawab usi zabaan aur andaaz mein do jis mein user baat kare (agar Roman Urdu mein likhe to Roman Urdu mein).\n`+
+  (d.job?`Tumhara kaam:\n${d.job}\n`:'')+
+  `\nUser ke baare mein jo yaad hai:\n${(d.mem||[]).map(m=>'- '+m).join('\n')||'(abhi kuch nahi)'}\n\n`+
+  `Agar user koi pukhta baat bataye jo baad mein kaam aaye (naam, pasand, aadat), to jawab ke aakhir mein ek alag line likho: [[yaad: sirf wo baat]]. Be-wajah yaad na karo. Deeni baat sirf Quran ya sahih hadees ke hawale se batao; pakka na ho to saaf keh do.`+
+  (S.cfg.prov==='gemini'&&S.cfg.search!==false?'\nTumhare paas Google Search hai. Taaza ya badalti maloomat (khabar, qeemat, tareekh, mausam) ke liye use karo. Deeni masail mein mustanad sources ko tarjeeh do.':'');
+}
+async function ask(d){
+  const {prov,key,model}=S.cfg;
+  if(!key)throw new Error('Pehle Settings mein key paste karein.');
+  const hist=d.msgs.slice(-30);
+  if(prov==='gemini'){
+    const call=async(useSearch)=>{
+      const body={systemInstruction:{parts:[{text:sysPrompt(d)}]},contents:hist.map(m=>({role:m.role==='user'?'user':'model',parts:[{text:m.text}]}))};
+      if(useSearch)body.tools=[{google_search:{}}];
+      const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`,{
+        method:'POST',headers:{'Content-Type':'application/json','x-goog-api-key':key},body:JSON.stringify(body)});
+      let j={};try{j=await r.json()}catch(e){}
+      if(!r.ok)throw new Error(j.error?.message||('Error '+r.status));
+      return j;
+    };
+    const wantSearch=S.cfg.search!==false;
+    let j,note='';
+    try{j=await call(wantSearch)}
+    catch(e){
+      if(!wantSearch)throw e;
+      j=await call(false);note='(Search is baar nahi chali, bina search ke jawab hai)\n\n';
+    }
+    if(j.promptFeedback?.blockReason)throw new Error('Jawab roka gaya: '+j.promptFeedback.blockReason);
+    const c=j.candidates?.[0];
+    const text=(c?.content?.parts||[]).map(p=>p.text||'').join('').trim();
+    const seen=new Set(),src=[];
+    (c?.groundingMetadata?.groundingChunks||[]).forEach(g=>{
+      const u=g.web?.uri;if(!u||!/^https?:\/\//i.test(u)||seen.has(u))return;
+      seen.add(u);src.push({t:(g.web.title||'Link').slice(0,40),u});
+    });
+    return {text:text?note+text:(note+'(khali jawab)'),src:src.slice(0,6)};
+  }
+  const r=await fetch('https://openrouter.ai/api/v1/chat/completions',{
+    method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
+    body:JSON.stringify({model,messages:[{role:'system',content:sysPrompt(d)},...hist.map(m=>({role:m.role==='user'?'user':'assistant',content:m.text}))]})});
+  let j={};try{j=await r.json()}catch(e){}
+  if(!r.ok)throw new Error(j.error?.message||('Error '+r.status));
+  return {text:j.choices?.[0]?.message?.content||'(khali jawab)',src:[]};
+}
+async function send(){
+  if(busy)return;const t=$('inp').value.trim();if(!t)return;const d=dot();
+  $('inp').value='';$('inp').style.height='auto';
+  d.msgs.push({role:'user',text:t});save();bubble('user',t);
+  busy=true;$('send').disabled=true;const w=bubble('ai','…');
+  try{
+    const res=await ask(d);let a=res.text;
+    a=a.replace(/\[\[yaad:\s*([^\]]+)\]\]/gi,(_,m)=>{m=m.trim();if(m&&!d.mem.includes(m))d.mem.push(m);return''}).trim();
+    w.firstChild.textContent=a;addSrc(w,res.src);d.msgs.push({role:'model',text:a,src:res.src});save();
+  }catch(e){w.firstChild.textContent='⚠ '+e.message;w.style.color='#f87171'}
+  busy=false;$('send').disabled=false;$('main').scrollTop=$('main').scrollHeight;
+}
+
+// ---------- wiring ----------
+$('send').onclick=send;
+$('inp').addEventListener('input',e=>{e.target.style.height='auto';e.target.style.height=Math.min(e.target.scrollHeight,120)+'px'});
+$('back').onclick=()=>{S.cur&&$('foot').classList.contains('hide')?openChat(S.cur):list()};
+$('gear').onclick=settings;
+$('gear2').onclick=()=>edit(S.cur);
+S.cur&&dot()?openChat(S.cur):list();
+</script>
+</body>
+</html>

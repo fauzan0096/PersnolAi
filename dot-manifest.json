@@ -1,7 +1,7 @@
 {
   "name": "Mera Dot",
   "short_name": "Mera Dot",
-  "start_url": "./dot.html",
+  "start_url": "./index.html",
   "scope": "./",
   "display": "standalone",
   "background_color": "#0f1115",
