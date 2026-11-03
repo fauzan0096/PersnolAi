@@ -62,11 +62,13 @@ label.chk small{color:var(--mut);display:block;font-size:12px}
 
 <script>
 // ---------- storage ----------
+const ZEN='https://opencode.ai/zen/v1';
+const DEF={zen:'big-pickle',gemini:'gemini-2.5-flash',openrouter:'deepseek/deepseek-chat-v3.1:free'};
 const K='mera_dot_v1';
 let S;
 try{S=JSON.parse(localStorage.getItem(K))}catch(e){}
 S=S||{};
-S.cfg=S.cfg||{prov:'gemini',key:'',model:'gemini-2.5-flash',search:true};
+S.cfg=S.cfg||{prov:'zen',key:'',model:DEF.zen,search:false,base:ZEN};
 S.dots=S.dots||[];S.conns=S.conns||[];if(S.cur===undefined)S.cur=null;
 const save=()=>{try{localStorage.setItem(K,JSON.stringify(S))}catch(e){}};
 const $=id=>document.getElementById(id);
@@ -78,7 +80,8 @@ const MAXR=12000;
 const cleanKey=k=>String(k||'').replace(/[^\x21-\x7E]/g,'');
 function friendly(st,m,prov){
   m=String(m||'').replace(/\s+/g,' ').slice(0,160);let h;
-  if(st===401||/API key not valid|API_KEY_INVALID|Invalid API key|No auth credentials|User not found/i.test(m))h='Key galat hai ya poori copy nahi hui. Settings mein dobara paste karein.';
+  if(prov==='zen'&&(st===401||st===403))h='Server ne rok diya ('+st+'). Ye free service band ya mehdood ho sakti hai. Thori der baad try karein.';
+  else if(st===401||/API key not valid|API_KEY_INVALID|Invalid API key|No auth credentials|User not found/i.test(m))h='Key galat hai ya poori copy nahi hui. Settings mein dobara paste karein.';
   else if(/location is not supported/i.test(m))h='Aapke ilaqe mein ye free API band hai. Doosra provider (OpenRouter) try karein.';
   else if(st===403)h='Key ko ijazat nahi mili (key par pabandi hai ya API band hai).';
   else if(st===404)h='Ye model is key par nahi mila. Settings mein "Key test karein" dabayein aur model list se chunein.';
@@ -89,7 +92,7 @@ function friendly(st,m,prov){
 }
 async function api(url,opt,prov){
   let r;
-  try{r=await fetch(url,opt)}catch(e){throw new Error('Network ka masla: internet check karein (ya browser ne request roki). Dobara try karein.')}
+  try{r=await fetch(url,opt)}catch(e){throw new Error('Network ka masla: internet check karein (ya browser ne request roki).'+(prov==='zen'?' Agar internet theek hai aur ye baar baar aaye to server browser ko allow nahi kar raha; Settings mein Server URL (proxy) badal kar dekhein.':'')+' Dobara try karein.')}
   let j=null;try{j=await r.json()}catch(e){}
   if(!r.ok){const m=j&&j.error;throw new Error(friendly(r.status,typeof m==='string'?m:(m&&m.message)||'',prov))}
   return j||{};
@@ -97,22 +100,33 @@ async function api(url,opt,prov){
 async function testKey(){
   const prov=$('c_prov').value,key=cleanKey($('c_key').value),msg=$('c_msg'),sel=$('c_models');
   sel.classList.add('hide');
-  if(!key){msg.textContent='⚠ Pehle key paste karein.';return}
+  if(prov!=='zen'&&!key){msg.textContent='⚠ Pehle key paste karein.';return}
   msg.textContent='Check ho raha hai...';$('c_test').disabled=true;
   try{
-    let ids=[];
+    let ids=[],extra='';
+    const cur=$('c_model').value.trim();
     if(prov==='gemini'){
       const j=await api('https://generativelanguage.googleapis.com/v1beta/models?pageSize=100',{headers:{'x-goog-api-key':key}},'gemini');
       ids=(j.models||[]).filter(m=>(m.supportedGenerationMethods||[]).includes('generateContent')&&!/tts|image|embedding|aqa|robotics|live|audio|native|computer/i.test(m.name)).map(m=>m.name.replace(/^models\//,''));
       const sc=x=>(/flash/.test(x)?0:1)+(/lite/.test(x)?2:0);ids.sort((a,b)=>sc(a)-sc(b));
-    }else{
+    }else if(prov==='openrouter'){
       await api('https://openrouter.ai/api/v1/auth/key',{headers:{'Authorization':'Bearer '+key}},'openrouter');
       const j=await api('https://openrouter.ai/api/v1/models',{},'openrouter');
       ids=(j.data||[]).map(m=>m.id).filter(x=>/:free$/.test(x));
+    }else{
+      const base=$('c_base').value.trim().replace(/\/+$/,'')||ZEN;
+      const bad=urlErr(base);if(bad)throw new Error(bad);
+      const auth='Bearer '+(key||'public');
+      const j=await api(base+'/models',{headers:{'Authorization':auth}},'zen');
+      ids=(j.data||j.models||[]).map(m=>m.id||m.name).filter(x=>x&&(/-free$/.test(x)||x==='big-pickle'));
+      const pick=ids.includes(cur)?cur:ids[0];
+      if(pick){
+        try{await api(base+'/chat/completions',{method:'POST',headers:{'Content-Type':'application/json','Authorization':auth},body:JSON.stringify({model:pick,messages:[{role:'user',content:'hi'}],max_tokens:16})},'zen');extra=' Chat test: ✓ ('+pick+')'}
+        catch(e){extra=' Chat test: ⚠ '+e.message}
+      }
     }
     ids=ids.slice(0,40);
-    const cur=$('c_model').value.trim();
-    msg.textContent='✓ Key theek hai. '+ids.length+' models mile.'+(ids.length&&!ids.includes(cur)?' ⚠ Aapka likha model list mein nahi, neeche se chunein.':'');
+    msg.textContent=(prov==='zen'?'✓ Server mila. ':'✓ Key theek hai. ')+ids.length+' models mile.'+extra+(ids.length&&!ids.includes(cur)?' ⚠ Aapka likha model list mein nahi, neeche se chunein.':'');
     if(ids.length){sel.innerHTML='<option value="">— model chunein —</option>'+ids.map(x=>`<option value="${esc(x)}">${esc(x)}</option>`).join('');sel.classList.remove('hide')}
   }catch(e){msg.textContent='⚠ '+e.message}
   $('c_test').disabled=false;
@@ -129,7 +143,7 @@ function show(view){
 function list(){
   S.cur=null;save();show('list');$('title').textContent='Mere Dots';
   let h='';
-  if(!S.cfg.key)h+='<div class="sys">Pehle ⚙ Settings mein free key paste karein.</div>';
+  if(S.cfg.prov!=='zen'&&!S.cfg.key)h+='<div class="sys">Pehle ⚙ Settings mein free key paste karein.</div>';
   S.dots.forEach(d=>{h+=`<div class="dot" data-id="${esc(d.id)}"><div class="av">${esc(d.emoji||'●')}</div><div><b>${esc(d.name)}</b><small>${esc((d.job||'').slice(0,60))}</small></div></div>`});
   h+='<button class="p" id="new" style="width:100%;margin-top:6px">+ Naya Dot</button>';
   $('main').innerHTML=h;
@@ -185,27 +199,34 @@ function settings(){
   show('edit');goBack=list;$('title').textContent='Settings';const c=S.cfg;
   $('main').innerHTML=`
   <label>AI provider</label>
-  <select id="c_prov"><option value="gemini">Google Gemini (free)</option><option value="openrouter">OpenRouter (free models)</option></select>
-  <label>API key</label><input id="c_key" type="password" value="${esc(c.key)}" placeholder="Yahan paste karein" autocomplete="off">
+  <select id="c_prov"><option value="zen">OpenCode Zen (bina key, free)</option><option value="gemini">Google Gemini (key chahiye)</option><option value="openrouter">OpenRouter (key chahiye)</option></select>
+  <div id="c_keybox"><label>API key</label><input id="c_key" type="password" value="${esc(c.key)}" placeholder="Yahan paste karein" autocomplete="off"></div>
+  <div id="c_basebox"><label>Server URL (aam taur par na badlein)</label><input id="c_base" value="${esc(c.base||ZEN)}"></div>
   <label>Model</label><input id="c_model" value="${esc(c.model)}">
-  <div class="row"><button id="c_test">Key test karein</button></div>
+  <div class="row"><button id="c_test">Test karein</button></div>
   <div id="c_msg" class="note" style="margin-top:8px"></div>
   <select id="c_models" class="hide" style="margin-top:8px"></select>
-  <label class="chk"><input type="checkbox" id="c_search" ${c.search!==false?'checked':''}><span>Live web search (sirf Gemini)</span></label>
+  <label class="chk" id="c_sbox"><input type="checkbox" id="c_search" ${c.search!==false?'checked':''}><span>Live web search (sirf Gemini)</span></label>
   <div class="note" style="margin-top:10px">
-  • Gemini key: aistudio.google.com/apikey par free milti hai (model: gemini-2.5-flash).<br>
-  • OpenRouter key: openrouter.ai/keys, model ke aakhir mein <b>:free</b> wala chunein, jaise deepseek/deepseek-chat-v3.1:free. OpenRouter ke saath connectors aur web search nahi chalte.<br>
+  • <b>OpenCode Zen:</b> koi key nahi chahiye. OpenCode ke free models ("-free" wale, aur big-pickle) anonymous chalte hain. Ye gair-sarkari free service hai: kabhi limit, band ya naam badal sakta hai. Free models mein aapki baatein model walon tak ja sakti hain, is liye hassas ya nijji baat na likhein. Agar "Network ka masla" baar baar aaye to Server URL badalna parega.<br>
+  • <b>Gemini:</b> key aistudio.google.com/apikey se free milti hai.<br>
+  • <b>OpenRouter:</b> key openrouter.ai/keys se; model ke aakhir mein <b>:free</b> wala chunein.<br>
   • Key sirf is phone ke browser mein save hoti hai, kisi repo ya server mein nahi jati.<br>
-  • Web search on ho to Dot taaza maloomat Google se dhoond kar sources ke saath deta hai. Free key par iski rozana limit hoti hai; limit khatam ho to Dot bina search ke jawab dega.<br>
-  • Jis Dot mein connector on ho, usme web search band rehti hai.<br>
-  • Free models ke naam badalte rehte hain. Agar error aaye to model ka naam yahan badal dein.</div>
+  • Web search sirf Gemini mein hai, aur jis Dot mein connector on ho wahan band rehti hai.<br>
+  • Free models ke naam badalte rehte hain. "Test karein" se maujooda list le kar model chunein.</div>
   <div class="row"><button class="p" id="c_ok">Save</button></div>
   <div class="row"><button class="d" id="c_wipe">Saara data mita dein</button></div>`;
   $('c_prov').value=c.prov;
-  $('c_prov').onchange=()=>{$('c_model').value=$('c_prov').value==='gemini'?'gemini-2.5-flash':'deepseek/deepseek-chat-v3.1:free';$('c_msg').textContent='';$('c_models').classList.add('hide')};
+  const apply=()=>{const v=$('c_prov').value;$('c_keybox').classList.toggle('hide',v==='zen');$('c_basebox').classList.toggle('hide',v!=='zen');$('c_sbox').classList.toggle('hide',v!=='gemini')};
+  apply();
+  $('c_prov').onchange=()=>{$('c_model').value=DEF[$('c_prov').value];$('c_msg').textContent='';$('c_models').classList.add('hide');apply()};
   $('c_test').onclick=testKey;
   $('c_models').onchange=e=>{if(e.target.value)$('c_model').value=e.target.value};
-  $('c_ok').onclick=()=>{S.cfg={prov:$('c_prov').value,key:cleanKey($('c_key').value),model:$('c_model').value.trim(),search:$('c_search').checked};save();list()};
+  $('c_ok').onclick=()=>{
+    const prov=$('c_prov').value,base=$('c_base').value.trim().replace(/\/+$/,'')||ZEN;
+    if(prov==='zen'){const bad=urlErr(base);if(bad)return alert(bad)}
+    S.cfg={prov,key:cleanKey($('c_key').value),model:$('c_model').value.trim(),search:$('c_search').checked,base};save();list();
+  };
   $('c_wipe').onclick=()=>{if(confirm('Sab dots, chats, connectors aur key mit jayenge. Pakka?')){localStorage.removeItem(K);location.reload()}};
 }
 
@@ -412,21 +433,30 @@ function sysPrompt(d,mode){
   return s;
 }
 const toC=m=>({role:m.role==='user'?'user':'model',parts:[{text:m.text}]});
-async function ask(d,st){
-  const {prov,model}=S.cfg;const key=cleanKey(S.cfg.key);
-  if(!key)throw new Error('Pehle Settings mein key paste karein.');
-  const hist=d.msgs.slice(-30);
-  if(prov==='gemini'){
-    const sel=(d.conns||[]).map(id=>S.conns.find(x=>x.id===id)).filter(Boolean);
-    let note='';
-    for(const c of sel){
-      if(c.type==='mcp'&&!(c.tools&&c.tools.length)){
-        try{st&&st('🔌 '+c.name+' se ja raha hoon…');await loadTools(c);save()}
-        catch(e){note+='('+c.name+' se judna nahi hua: '+e.message+')\n'}
-      }
+async function prepTools(d,st){
+  const sel=(d.conns||[]).map(id=>S.conns.find(x=>x.id===id)).filter(Boolean);
+  let note='';
+  for(const c of sel){
+    if(c.type==='mcp'&&!(c.tools&&c.tools.length)){
+      try{st&&st('🔌 '+c.name+' se ja raha hoon…');await loadTools(c);save()}
+      catch(e){note+='('+c.name+' se judna nahi hua: '+e.message+')\n'}
     }
-    const {decls,map,capped}=buildTools(sel);
-    if(capped)note+='(Tools zyada the, pehle 50 hi use hue)\n';
+  }
+  const {decls,map,capped}=buildTools(sel);
+  if(capped)note+='(Tools zyada the, pehle 50 hi use hue)\n';
+  return {decls,map,note};
+}
+async function ask(d,st){
+  const prov=S.cfg.prov,model=S.cfg.model,key=cleanKey(S.cfg.key);
+  if(prov!=='zen'&&!key)throw new Error('Pehle Settings mein key paste karein.');
+  if(prov==='gemini')return askGemini(d,st,key,model);
+  const base=(prov==='zen'?(S.cfg.base||ZEN):'https://openrouter.ai/api/v1').replace(/\/+$/,'');
+  return askOAI(d,st,{prov,model,url:base+'/chat/completions',auth:prov==='zen'?(key||'public'):key});
+}
+async function askGemini(d,st,key,model){
+  const hist=d.msgs.slice(-30);
+  {
+    const {decls,map,note:n0}=await prepTools(d,st);let note=n0;
     const mode0=decls.length?'tools':(S.cfg.search!==false?'search':'none');
     const call=async(contents,mode,force)=>{
       const body={systemInstruction:{parts:[{text:sysPrompt(d,mode)}]},contents};
@@ -466,12 +496,43 @@ async function ask(d,st){
     });
     return {text:note+(text||'(khali jawab)'),src:src.slice(0,6)};
   }
-  const j=await api('https://openrouter.ai/api/v1/chat/completions',{
-    method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+key},
-    body:JSON.stringify({model,messages:[{role:'system',content:sysPrompt(d,'none')},...hist.map(m=>({role:m.role==='user'?'user':'assistant',content:m.text}))]})},'openrouter');
-  if(j.error)throw new Error(friendly(+j.error.code||400,j.error.message,'openrouter'));
-  const nt=(d.conns||[]).length?'(Connectors sirf Gemini ke saath chalte hain)\n':'';
-  return {text:nt+(((j.choices&&j.choices[0]&&j.choices[0].message&&j.choices[0].message.content)||'(khali jawab)')),src:[]};
+}
+async function askOAI(d,st,o){
+  const hist=d.msgs.slice(-30).map(m=>({role:m.role==='user'?'user':'assistant',content:m.text}));
+  const {decls,map,note:n0}=await prepTools(d,st);let note=n0;
+  const tools=decls.map(x=>({type:'function',function:{name:x.name,description:x.description,parameters:x.parameters||{type:'object',properties:{}}}}));
+  const call=async(msgs,mode,force)=>{
+    const body={model:o.model,messages:[{role:'system',content:sysPrompt(d,mode)},...msgs]};
+    if(mode==='tools'){body.tools=tools;if(force)body.tool_choice='none'}
+    const j=await api(o.url,{method:'POST',headers:{'Content-Type':'application/json','Authorization':'Bearer '+o.auth},body:JSON.stringify(body)},o.prov);
+    if(j.error)throw new Error(friendly(+(j.error.code||j.error.status)||400,j.error.message||String(j.error),o.prov));
+    return j;
+  };
+  const mode0=tools.length?'tools':'none';
+  let j,mode=mode0,msgs=hist.slice(),rounds=0;
+  try{
+    while(true){
+      j=await call(msgs,mode,rounds>=6);
+      const m=j.choices&&j.choices[0]&&j.choices[0].message;
+      const tcs=(m&&m.tool_calls)||[];
+      if(mode!=='tools'||!tcs.length||rounds>=6)break;
+      rounds++;
+      msgs.push({role:'assistant',content:m.content||'',tool_calls:tcs});
+      for(const tc of tcs){
+        const fn=tc.function||{};st&&st('🔧 '+fn.name+'…');
+        let args={};try{args=JSON.parse(fn.arguments||'{}')}catch(e){}
+        const r=await runTool(map[fn.name],args);
+        msgs.push({role:'tool',tool_call_id:tc.id,content:r.error?('Error: '+r.error):r.result});
+      }
+    }
+  }catch(e){
+    if(mode0==='none')throw e;
+    note+='(Connectors is baar chale nahi: '+e.message+')\n';
+    mode='none';msgs=hist.slice();j=await call(msgs,'none');
+  }
+  const m=j.choices&&j.choices[0]&&j.choices[0].message;
+  const text=String((m&&m.content)||'').trim();
+  return {text:note+(text||'(khali jawab)'),src:[]};
 }
 async function send(){
   if(busy)return;const t=$('inp').value.trim();if(!t)return;const d=dot();
